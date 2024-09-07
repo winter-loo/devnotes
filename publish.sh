@@ -3,6 +3,7 @@
 if [ "$1" = "-f" ]; then
     echo "Force deletion requested. Removing existing 'quartz' directory..."
     rm -rf quartz
+    shift
 fi
 
 if [ ! -d "quartz" ]; then
@@ -11,7 +12,9 @@ if [ ! -d "quartz" ]; then
     cd quartz
     npm i
     npx quartz create -d content -s ../content -X symlink -l shortest
+    cd ..
 fi
 
 pushd quartz
-npx quartz build --serve
+
+npx quartz build "$@"
