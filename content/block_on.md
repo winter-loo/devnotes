@@ -1,4 +1,3 @@
-
 # block_on
 
 ## part 1
@@ -211,4 +210,4 @@ impl CachedParkThread {
 }
 ```
 
-see [[./design_of_cachedparkthread.txt]]
+see [[design_of_cachedparkthread.txt]]
