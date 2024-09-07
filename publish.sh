@@ -1,15 +1,7 @@
-#!/bin/sh
+#!/bin/sh -x
 
 # environment setup
-# Check if OS is Ubuntu and upgrade Node.js to the latest stable version if so
-if [ -f /etc/lsb-release ] && grep -q "Ubuntu" /etc/lsb-release; then
-    echo "Ubuntu detected. Upgrading Node.js to the latest stable version..."
-    sudo apt update
-    sudo apt install -y curl
-    curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
-    sudo apt install -y nodejs
-    echo "Node.js version after upgrade: $(node -v)"
-fi
+# For Cloudfare, set the environment variable NODE_VERSION=22 on its page
 
 if [ "$1" = "-f" ]; then
     echo "Force deletion requested. Removing existing 'quartz' directory..."
@@ -26,6 +18,6 @@ if [ ! -d "quartz" ]; then
     cd ..
 fi
 
-pushd quartz
+cd quartz
 
 npx quartz build "$@"
