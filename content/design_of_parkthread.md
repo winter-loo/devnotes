@@ -3,30 +3,30 @@ Let's break down the design of `ParkThread` and `UnparkThread`:
 1. Overall Structure:
    Both `ParkThread` and `UnparkThread` share a common `Inner` struct through an `Arc`:
 
-```rust
-pub(crate) struct ParkThread {
-    inner: Arc<Inner>,
-}
+    ```rust
+    pub(crate) struct ParkThread {
+        inner: Arc<Inner>,
+    }
 
-pub(crate) struct UnparkThread {
-    inner: Arc<Inner>,
-}
+    pub(crate) struct UnparkThread {
+        inner: Arc<Inner>,
+    }
 
-struct Inner {
-    state: AtomicUsize,
-    mutex: Mutex<()>,
-    condvar: Condvar,
-}
-```
+    struct Inner {
+        state: AtomicUsize,
+        mutex: Mutex<()>,
+        condvar: Condvar,
+    }
+    ```
 
 2. State Management:
    The `Inner` struct uses an `AtomicUsize` to manage the parking state:
 
-```rust
-const EMPTY: usize = 0;
-const PARKED: usize = 1;
-const NOTIFIED: usize = 2;
-```
+    ```rust
+    const EMPTY: usize = 0;
+    const PARKED: usize = 1;
+    const NOTIFIED: usize = 2;
+    ```
 
 3. ParkThread Functionality:
    - `new()`: Creates a new `ParkThread` with an initialized `Inner`.
@@ -50,10 +50,12 @@ const NOTIFIED: usize = 2;
    - Notifies the condition variable to wake up a parked thread.
 
 7. Thread-Safety:
-   The use of atomic operations, mutexes, and condition variables ensures thread-safe operation.
+   The use of atomic operations, mutexes, and condition variables ensures
+   thread-safe operation.
 
 8. Waker Integration:
-   `UnparkThread` can be converted into a `Waker`, allowing integration with Rust's async/await system.
+   `UnparkThread` can be converted into a `Waker`, allowing integration with
+   Rust's async/await system.
 
 9. Efficiency:
    - Fast path for already-notified threads.
@@ -63,4 +65,8 @@ const NOTIFIED: usize = 2;
 10. Flexibility:
     Supports both indefinite parking and timeout-based parking.
 
-This design allows for efficient thread parking and unparking, which is crucial for Tokio's runtime performance. The separation of `ParkThread` and `UnparkThread` allows for clear ownership semantics, where the thread that can park itself holds the `ParkThread`, while other threads that need to wake it up can hold `UnparkThread`s. 
+This design allows for efficient thread parking and unparking, which is crucial
+for Tokio's runtime performance. The separation of `ParkThread` and `UnparkThread`
+allows for clear ownership semantics, where the thread that can park itself
+holds the `ParkThread`, while other threads that need to wake it up can hold
+`UnparkThread`s. 
