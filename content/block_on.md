@@ -2,7 +2,7 @@
 
 ## part 1
 
-[[runtime_intro.md]]
+[[runtime_intro]]
 
 ```rust
 impl Runtime {
@@ -13,20 +13,20 @@ impl Runtime {
 	}
 
 	pub fn enter(&self) -> EnterGuard<'_> {
-        // runtime::Handle::enter
+        //! runtime::Handle::enter
 		self.handle.enter()
 	}
 }
 
-/// module: runtime::Handle
+//! module: runtime::Handle
 /// Handle to the runtime.
 pub struct Handle {
-    /// tokio has several schedulers. Each scheduler has its own Handle.
-    /// The most important two handles are:
-    ///
-    ///   - current_thread::Handle
-    ///   - multi_thread::Handle
-    ///
+    //! tokio has several schedulers. Each scheduler has its own Handle.
+    //! The most important two handles are:
+    //!
+    //!   - current_thread::Handle
+    //!   - multi_thread::Handle
+    //!
     pub(crate) inner: scheduler::Handle,
 }
 
@@ -43,9 +43,9 @@ impl Handle {
 	}
 }
 
-// module: context::try_set_current
+//! module: context::try_set_current
 pub(crate) fn try_set_current(handle: &scheduler::Handle) -> Option<SetCurrentGuard> {
-    // thread-local context
+    //! thread-local context
     CONTEXT.try_with(|ctx| ctx.set_current(handle)).ok()
 }
 
@@ -70,7 +70,7 @@ struct HandleCell {
 
 impl Context {
     pub(super) fn set_current(&self, handle: &scheduler::Handle) -> SetCurrentGuard {
-        // scheduler::Handle is an Arc type, so `clone` shares the handle
+        //! scheduler::Handle is an Arc type, so `clone` shares the handle
         let old_handle = self.current.handle.borrow_mut().replace(handle.clone());
         let depth = self.current.depth.get();
 
@@ -79,7 +79,7 @@ impl Context {
         let depth = depth + 1;
         self.current.depth.set(depth);
 
-        // old handle will be restored when `SetCurrentGuard` gets dropped
+        //! old handle will be restored when `SetCurrentGuard` gets dropped
         SetCurrentGuard {
             prev: old_handle,
             depth,
@@ -134,7 +134,7 @@ impl Runtime {
 	pub fn block_on<F: Future>(&self, future: F) -> F::Output {
 		// ...
 		
-        // we focus on multi-thread scheduler
+        //! we focus on multi-thread scheduler
 		match &self.scheduler {
 			#[cfg(feature = "rt-multi-thread")]
 			Scheduler::MultiThread(exec) => exec.block_on(&self.handle.inner, future),
@@ -155,12 +155,12 @@ impl MultiThread {
       blocking.block_on(future).expect("failed to park thread")
     })
 
-    // REVIEW: the above code could be simplified logically as below:
-    // {
-    //     use crate::runtime::park::CachedParkThread;
-    //     let mut park = CachedParkThread::new();
-    //     park.block_on(future)
-    // }
+    //! REVIEW: the above code could be simplified logically as below:
+    //! {
+    //!     use crate::runtime::park::CachedParkThread;
+    //!     let mut park = CachedParkThread::new();
+    //!     park.block_on(future)
+    //! }
   }
 }
 
@@ -170,9 +170,9 @@ where
     F: FnOnce(&mut BlockingRegionGuard) -> R,
 {
     let maybe_guard = CONTEXT.with(|c| {
-            // Set the entered flag
-            // Here, `runtime` better be renamed `runtime_flag`,
-            // `EnterRuntime` better be renamed `EnterRuntimeFlag`
+            //! Set the entered flag
+            //! Here, `runtime` better be renamed `runtime_flag`,
+            //! `EnterRuntime` better be renamed `EnterRuntimeFlag`
             c.runtime.set(EnterRuntime::Entered {
                 allow_block_in_place,
             });
@@ -192,8 +192,8 @@ where
             })
     });
 
-    // execute function `f` with current settings
-    // and restore settings after execution
+    //! execute function `f` with current settings
+    //! and restore settings after execution
     if let Some(mut guard) = maybe_guard {
         return f(&mut guard.blocking);
     }
@@ -262,7 +262,7 @@ impl CachedParkThread {
         pin!(f);
 
         loop {
-            // see [[notes 2]]
+            //! see [[note 2]]
             if let Ready(v) = crate::runtime::coop::budget(|| f.as_mut().poll(&mut cx)) {
                 return Ok(v);
             }
@@ -272,11 +272,12 @@ impl CachedParkThread {
     }
 
     fn waker(&self) -> Result<Waker, AccessError> {
-        // see [[notes 1]]
+        //! see [[note 1]]
         self.unpark().map(UnparkThread::into_waker)
     }
 
     fn unpark(&self) -> Result<UnparkThread, AccessError> {
+        //! see [[note 4]]
         self.with_current(ParkThread::unpark)
     }
 }
@@ -284,6 +285,9 @@ impl CachedParkThread {
 
 **NOTES**
 
-1. see [[design_of_cachedparkthread.md]]
-2. see [[what_is_a_cooperative_budget.md]]
-3. see [[budget_implementation.md]]
+1. [[design_of_cachedparkthread]]
+2. [[what_is_a_cooperative_budget]]
+3. [[budget_implementation]]
+4. [[design_of_parkthread]]
+5. [[basics/phantomdata]]
+6. [[basics/send_sync]]

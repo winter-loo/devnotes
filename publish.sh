@@ -18,6 +18,5 @@ if [ ! -d "quartz" ]; then
     cd ..
 fi
 
-cd quartz
-
-npx quartz build "$@"
+cp quartz.config.ts quartz.layout.ts quartz/
+cd quartz && npx quartz build "$@"

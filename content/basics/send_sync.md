@@ -1,4 +1,6 @@
-# Concept
+# Send and Sync
+
+## Concept
 
 source: https://doc.rust-lang.org/nomicon/send-and-sync.html
 
@@ -25,15 +27,15 @@ source: https://doc.rust-lang.org/nomicon/send-and-sync.html
        unsynchronized shared mutable state
 
 
-# Usage of Send and Sync
+## Usage of Send and Sync
 
-## Not Send or Sync
+### Not Send or Sync
 
 ```rust
 pub(crate) struct NotSendOrSync(#[allow(dead_code)] *mut ());
 ```
 
-## Send but not Sync
+### Send but not Sync
 
 Here's an example of a type that is `Send` but not `Sync`:
 
@@ -73,7 +75,7 @@ fn main() {
 }
 ```
 
-## Send and Sync
+### Send and Sync
 
 Now, let's demonstrate a type that is both `Send` and `Sync`:
 

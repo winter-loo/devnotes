@@ -1,4 +1,4 @@
-# demo
+## demo
 
 ```rust
 use tokio::net::TcpStream;
@@ -32,7 +32,7 @@ pub(crate) fn to_socket_addrs<T>(arg: T) -> T::Future
         arg.to_socket_addrs(sealed::Internal)
     }
 
-// XXX(ldd): interface/implementation pattern, wrapper, ecapsulation
+//! interface/implementation pattern, wrapper, ecapsulation
 pub trait ToSocketAddrs: sealed::ToSocketAddrsPriv {}
 
 mod sealed {
@@ -47,7 +47,7 @@ mod sealed {
 
 impl ToSocketAddrs for str {}
 
-// XXX(ldd): net/addr.rs
+//! net/addr.rs
 impl sealed::ToSocketAddrsPriv for str {
     type Iter = sealed::OneOrMore;
     type Future = sealed::MaybeReady;
@@ -57,7 +57,7 @@ impl sealed::ToSocketAddrsPriv for str {
         use sealed::MaybeReady;
 
         // First check if the input parses as a socket address
-        // XXX(ldd): https://doc.rust-lang.org/stable/std/net/enum.SocketAddr.html
+        //! https://doc.rust-lang.org/stable/std/net/enum.SocketAddr.html
         let res: Result<SocketAddr, _> = self.parse();
 
         if let Ok(addr) = res {
@@ -65,12 +65,11 @@ impl sealed::ToSocketAddrsPriv for str {
         }
 
         // Run DNS lookup on the blocking pool
-        // XXX(ldd): convert `str` to a heap-allocated String
+        //! convert `str` to a heap-allocated String
         let s = self.to_owned();
 
-        // XXX(ldd):
-        //  - `spawn_blocking` noted in later section.
-        //  - `MaybeReady` is a manually-implemented Future
+        //! - `spawn_blocking` noted in later section.
+        //! - `MaybeReady` is a manually-implemented Future
         MaybeReady(sealed::State::Blocking(spawn_blocking(move || {
             std::net::ToSocketAddrs::to_socket_addrs(&s)
         })))
