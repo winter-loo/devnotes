@@ -88,7 +88,7 @@ enum State {
     Blocking(JoinHandle<io::Result<vec::IntoIter<SocketAddr>>>),
 }
 ```
-MaybeReady implements `Future`.
+MaybeReady implements `Future`. We can implement our own [[future]].
 
 ```rust
 enum OneOrMore {
@@ -127,8 +127,6 @@ struct JoinHandle<T> {
     _p: PhantomData<T>,
 }
 ```
-
-[[pin]]
 
 ## spawn_blocking
 
