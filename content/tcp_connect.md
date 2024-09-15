@@ -17,21 +17,28 @@ pub async fn main() -> Result<(), Box<dyn Error>> {
 }
 ```
 
-## TcpStream::connect
+## Get Socket Address
+
+The first step of `TcpStream::connect` is getting socket address.
 
 ```rust
-pub async fn connect<A: ToSocketAddrs>(addr: A) -> io::Result<TcpStream> {
+async fn connect<A: ToSocketAddrs>(addr: A) -> io::Result<TcpStream> {
     let addrs = to_socket_addrs(addr).await?;
     // ...
 }
 
-pub(crate) fn to_socket_addrs<T>(arg: T) -> T::Future
-    where
-        T: ToSocketAddrs,
-    {
-        arg.to_socket_addrs(sealed::Internal)
-    }
+fn to_socket_addrs<T>(arg: T) -> T::Future
+    where T: ToSocketAddrs,
+{
+    arg.to_socket_addrs(sealed::Internal)
+}
 
+impl ToSocketAddrs for str {}
+```
+
+We need implement `ToSocketAddrs` trait for string.
+
+```rust
 //! interface/implementation pattern, wrapper, ecapsulation
 pub trait ToSocketAddrs: sealed::ToSocketAddrsPriv {}
 
@@ -44,9 +51,11 @@ mod sealed {
         fn to_socket_addrs(&self, internal: Internal) -> Self::Future;
     }
 }
+```
 
-impl ToSocketAddrs for str {}
+Tokio uses an internal implementation.
 
+```rust
 //! net/addr.rs
 impl sealed::ToSocketAddrsPriv for str {
     type Iter = sealed::OneOrMore;
@@ -88,6 +97,7 @@ enum State {
     Blocking(JoinHandle<io::Result<vec::IntoIter<SocketAddr>>>),
 }
 ```
+
 MaybeReady implements `Future`. We can implement our own [[future]].
 
 ```rust
@@ -119,15 +129,57 @@ impl Future for MaybeReady {
 }
 ```
 
-### JoinHandle
+`ready!` returns `Poll::Pending` or gets the ready output.
+
+> [!tip]- ref mut
+>
+> A `ref` borrow on the left side of an assignment is equivalent to
+> an `&` borrow on the right side.
+>
+> ```rust
+> let mut c = 'Q';
+> let ref mut ref_c1 = c;
+> let ref_c2 = &mut c;
+> ```
+
+From the implementation above we know that the `Future` completion of `MaybeReady`
+partly depends on the `Future` completion of `JoinHandle`.
+
+## JoinHandle
 
 ```rust
 struct JoinHandle<T> {
     raw: RawTask,
     _p: PhantomData<T>,
 }
+
+impl<T> Future for JoinHandle<T> {
+    type Output = super::Result<T>;
+
+    //! simplified implementation
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut ret = Poll::Pending;
+
+        unsafe {
+            self.raw
+                .try_read_output(&mut ret as *mut _ as *mut (), cx.waker());
+        }
+
+        ret
+    }
+}
 ```
+
+What is our `JoinHandle` for `TcpStream::connect`?
+
+It's returned by `spawn_blocking`.
 
 ## spawn_blocking
 
-TODO: net/addr.rs:182 spawn_blocking internals
+```rust
+spawn_blocking(move || {
+    std::net::ToSocketAddrs::to_socket_addrs(&s)
+})
+```
+
+[[spawn_blocking]]
