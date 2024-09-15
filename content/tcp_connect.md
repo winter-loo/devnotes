@@ -79,7 +79,56 @@ impl sealed::ToSocketAddrsPriv for str {
 
 ## MaybeReady
 
-TODO: net/addr.rs:182 MaybeReady implementation
+```rust
+struct MaybeReady(State);
+
+#[derive(Debug)]
+enum State {
+    Ready(Option<SocketAddr>),
+    Blocking(JoinHandle<io::Result<vec::IntoIter<SocketAddr>>>),
+}
+```
+MaybeReady implements `Future`.
+
+```rust
+enum OneOrMore {
+    One(option::IntoIter<SocketAddr>),
+    More(vec::IntoIter<SocketAddr>),
+}
+
+impl Future for MaybeReady {
+    type Output = io::Result<OneOrMore>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.0 {
+            State::Ready(ref mut i) => {
+                let iter = OneOrMore::One(i.take().into_iter());
+                Poll::Ready(Ok(iter))
+            }
+            State::Blocking(ref mut rx) => {
+                //! This line asynchronously polls an inner future, propagates
+                //! any errors, and transforms the successful result into a
+                //! OneOrMore::More variant. 
+                //! So, `JoinHandle` implements also `Future`
+                let res = ready!(Pin::new(rx).poll(cx))?.map(OneOrMore::More);
+
+                Poll::Ready(res)
+            }
+        }
+    }
+}
+```
+
+### JoinHandle
+
+```rust
+struct JoinHandle<T> {
+    raw: RawTask,
+    _p: PhantomData<T>,
+}
+```
+
+[[pin]]
 
 ## spawn_blocking
 
