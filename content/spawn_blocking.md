@@ -69,6 +69,7 @@ fn spawn_blocking_inner<F, R>(
     rt: &Handle,
 ) -> (JoinHandle<R>, Result<(), SpawnError>)
 {
+    //: `BlockingTask` implements `Future`
     let fut = BlockingTask::new(func);
     let id = task::Id::next();
 
@@ -77,6 +78,28 @@ fn spawn_blocking_inner<F, R>(
 
     let spawned = self.spawn_task(blocking::pool::Task::new(task, is_mandatory), rt);
     (handle, spawned)
+}
+```
+
+`BlockingTask` implements `Future`. This future will get polled when [[spawn_task##run task]].
+
+```rust
+impl<T, R> Future for BlockingTask<T>
+{
+    type Output = R;
+
+    fn poll(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<R> {
+        let me = &mut *self;
+        let func = me
+            .func
+            .take()
+            .expect("[internal exception] blocking task ran twice.");
+
+        //: comments removed from the original source code
+        crate::runtime::coop::stop();
+
+        Poll::Ready(func())
+    }
 }
 ```
 

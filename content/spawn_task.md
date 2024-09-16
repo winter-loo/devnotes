@@ -149,3 +149,144 @@ impl Inner {
     }
 }
 ```
+
+## run task
+
+```rust
+//: blocking::pool::Task
+struct Task {
+    task: task::UnownedTask<BlockingSchedule>,
+    mandatory: Mandatory,
+}
+
+impl Task {
+    fn run(self) {
+        self.task.run();
+    }
+}
+
+impl UnownedTask {
+    fn run(self) {
+        let raw = self.raw;
+        mem::forget(self);
+
+        // Transfer one ref-count to a Task object.
+        let task = Task::<S> {
+            raw,
+            _p: PhantomData,
+        };
+
+        // Use the other ref-count to poll the task.
+        raw.poll();
+        // Decrement our extra ref-count
+        drop(task);
+    }
+}
+
+impl RawTask {
+    fn poll(self) {
+        let vtable = self.header().vtable;
+        unsafe { (vtable.poll)(self.ptr) }
+    }
+}
+
+unsafe fn poll<T: Future, S: Schedule>(ptr: NonNull<Header>) {
+    let harness = Harness::<T, S>::from_raw(ptr);
+    harness.poll();
+}
+
+impl Harness {
+    fn poll(self) {
+        match self.poll_inner() {
+            PollFuture::Notified => {
+                self.core()
+                    .scheduler
+                    .yield_now(Notified(self.get_new_task()));
+
+                self.drop_reference();
+            }
+            PollFuture::Complete => {
+                self.complete();
+            }
+            PollFuture::Dealloc => {
+                self.dealloc();
+            }
+            PollFuture::Done => (),
+        }
+    }
+
+    //: poll around state
+    fn poll_inner(&self) -> PollFuture {
+        use super::state::{TransitionToIdle, TransitionToRunning};
+
+        match self.state().transition_to_running() {
+            TransitionToRunning::Success => {
+                let header_ptr = self.header_ptr();
+                let waker_ref = waker_ref::<S>(&header_ptr);
+                let cx = Context::from_waker(&waker_ref);
+                let res = poll_future(self.core(), cx);
+
+                if res == Poll::Ready(()) {
+                    // The future completed. Move on to complete the task.
+                    return PollFuture::Complete;
+                }
+                match self.state().transition_to_idle() {
+                    TransitionToIdle::Ok => PollFuture::Done,
+                    TransitionToIdle::OkNotified => PollFuture::Notified,
+                    TransitionToIdle::OkDealloc => PollFuture::Dealloc,
+                    TransitionToIdle::Cancelled => PollFuture::Complete,
+                }
+            }
+            TransitionToRunning::Cancelled => {
+                cancel_task(self.core());
+                PollFuture::Complete
+            }
+            TransitionToRunning::Failed => PollFuture::Done,
+            TransitionToRunning::Dealloc => PollFuture::Dealloc,
+        }
+    }
+}
+
+
+//: poll around panics!
+fn poll_future<T: Future, S: Schedule>(core: &Core<T, S>, cx: Context<'_>) -> Poll<()> {
+    // Poll the future.
+    let output = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        struct Guard<'a, T: Future, S: Schedule> {
+            core: &'a Core<T, S>,
+        }
+        impl<'a, T: Future, S: Schedule> Drop for Guard<'a, T, S> {
+            fn drop(&mut self) {
+                // If the future panics on poll, we drop it inside the panic
+                // guard.
+                self.core.drop_future_or_output();
+            }
+        }
+        let guard = Guard { core };
+        //: real poll
+        let res = guard.core.poll(cx);
+        mem::forget(guard);
+        res
+    }));
+
+    // Prepare output for being placed in the core stage.
+    let output = match output {
+        Ok(Poll::Pending) => return Poll::Pending,
+        Ok(Poll::Ready(output)) => Ok(output),
+        Err(panic) => Err(panic_to_error(&core.scheduler, core.task_id, panic)),
+    };
+
+    // Catch and ignore panics if the future panics on drop.
+    let res = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        core.store_output(output);
+    }));
+
+    if res.is_err() {
+        core.scheduler.unhandled_panic();
+    }
+
+    Poll::Ready(())
+}
+```
+
+[[task_state]]
