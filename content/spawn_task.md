@@ -171,7 +171,7 @@ impl UnownedTask {
         mem::forget(self);
 
         // Transfer one ref-count to a Task object.
-        let task = Task::<S> {
+        let task = task::Task {
             raw,
             _p: PhantomData,
         };

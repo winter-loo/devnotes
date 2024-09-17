@@ -1,2 +1,3 @@
 /quartz/
-/code/
+/code/target/
+/code/Cargo.lock
