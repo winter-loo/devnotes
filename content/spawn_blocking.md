@@ -295,7 +295,7 @@ enum Stage<T: Future> {
 
 A task is initialized with three references. Only when ref count decrements
 to zero, the underlying `Cell` gets deallocated. Tokio uses `std::mem::forget`
-to avoid double free.
+to avoid [double free](https://github.com/winter-loo/tokio-notes/blob/main/code/src/bin/double_free.rs).
 
 ```rust
 struct Task<S: 'static> {
