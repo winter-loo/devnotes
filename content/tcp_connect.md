@@ -17,7 +17,7 @@ pub async fn main() -> Result<(), Box<dyn Error>> {
 }
 ```
 
-# internals
+## internals
 
 [[get_socket_address|part 1: Get Socket Address]]
 

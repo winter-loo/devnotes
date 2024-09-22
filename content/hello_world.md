@@ -35,16 +35,33 @@ build_threaded_runtime 函数初始化了三个模块：
 2. BlockingPool
 3. ThreadedScheduler
 
+### Driver
+
 Driver 里面封装了不同平台的 IO 事件处理机制（epoll, kqueue, IOCP），信号处理机
 制，timer 机制。
 
+```text
+build_threaded_runtime
+runtime::driver::Driver::new
+create_io_stack
+runtime::io::Driver::new
+```
+
+`runtime::io::Driver::new` uses [mio](https://github.com/tokio-rs/mio) to create a new event loop.
+
+### BlockingPool
+
 BlockingPool 实现了线程池机制, 线程池处理一堆在 VecDeque 里的 Task.
+
+### ThreadedScheduler
 
 ThreadedScheduler 包含固定线程数，每个 Worker 线程有个 LocalQueue, 还有一个
 SchedulerHandle 用于管理内部线程，如：unpark/wakeup/signal Worker.
 
 在 build_threaded_runtime 的最后，启动所有的 Worker. 每个 Worker 内部运行
 Context::run 方法直至 shutdown.
+
+[[worker_runloop]]
 
 ## block_on
 

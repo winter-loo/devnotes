@@ -262,7 +262,7 @@ impl CachedParkThread {
         pin!(f);
 
         loop {
-            //! see [[note 2]]
+            //: see [[note 2]]
             if let Ready(v) = crate::runtime::coop::budget(|| f.as_mut().poll(&mut cx)) {
                 return Ok(v);
             }
