@@ -1,5 +1,7 @@
 # spawn_blocking
 
+[[understand_blocking]]
+
 * This function is intended for non-async operations that eventually finish on
   their own.
 * Tokio will spawn more blocking threads when they are requested through this
