@@ -5,3 +5,7 @@ Code Notes About [Tokio Source Code](https://github.com/tokio-rs/tokio/tree/1166
 * [[hello_world]]
 * [[tcp_connect]]
 * [[echo]]
+
+## references
+
+- [Making the Tokio scheduler 10x faster](https://tokio.rs/blog/2019-10-scheduler)
