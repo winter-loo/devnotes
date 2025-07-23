@@ -1,0 +1,9 @@
+@use "./base.scss";
+
+// put your custom CSS here!
+@font-face {
+  font-family: '0xProto Nerd Font';
+  font-style: normal;
+  font-weight: normal;
+  src: url('/static/0xProtoNerdFont-Regular.ttf') format('ttf');
+}

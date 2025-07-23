@@ -18,5 +18,7 @@ if [ ! -d "quartz" ]; then
     cd ..
 fi
 
-cp quartz.config.ts quartz.layout.ts quartz/
+cp quartz-config/quartz.config.ts quartz-config/quartz.layout.ts quartz/
+cp quartz-config/custom.scss quartz/quartz/styles/
+cp quartz-config/0xProtoNerdFont-Regular.ttf quartz/quartz/static/
 cd quartz && npx quartz build "$@"

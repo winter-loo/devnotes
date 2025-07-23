@@ -8,7 +8,7 @@ import * as Plugin from "./quartz/plugins"
  */
 const config: QuartzConfig = {
   configuration: {
-    pageTitle: "tokio notes",
+    pageTitle: "developer notes",
     enableSPA: true,
     enablePopovers: true,
     analytics: {
@@ -16,15 +16,21 @@ const config: QuartzConfig = {
     },
     locale: "en-US",
     baseUrl: "tokio-notes.pages.dev",
-    ignorePatterns: ["private", "templates", ".obsidian"],
+    ignorePatterns: [
+      "private",
+      "templates",
+      ".obsidian",
+      "notes-sqlite/sqlite-src",
+      "notes-tokio/tokio-src"
+    ],
     defaultDateType: "created",
     theme: {
       fontOrigin: "googleFonts",
       cdnCaching: true,
       typography: {
         header: "Schibsted Grotesk",
-        body: "Source Sans Pro",
-        code: "IBM Plex Mono",
+        body: "Fira Code",
+        code: "0xProto Nerd Font",
       },
       colors: {
         lightMode: {

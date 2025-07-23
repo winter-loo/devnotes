@@ -1,3 +1,6 @@
 [submodule "tokio"]
 	path = tokio
 	url = https://github.com/tokio-rs/tokio.git
+[submodule "notes-sqlite/sqlite"]
+	path = notes-sqlite/sqlite
+	url = https://github.com/sqlite/sqlite.git

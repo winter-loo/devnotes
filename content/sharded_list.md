@@ -1,3 +1,0 @@
-# sharded list
-
-TODO:
