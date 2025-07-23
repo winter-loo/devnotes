@@ -157,6 +157,7 @@ see [src/btreeInt.h]
 A database is a collection of btree pages.
 
 [SQLite File Format Viewer](https://sqlite-internal.pages.dev/)
+[An Exercise in Rust](https://github.com/winter-loo/snippets-rust/tree/main/codecrafters-sqlite)
 
 
 ### varint
