@@ -150,6 +150,8 @@ constraints on the left-most columns of the index.
 
 ## database file format
 
+![sqlite btree leaf page format](./assets/sqlite_btree_leaf_page_format.png)
+
 https://www.sqlite.org/fileformat2.html
 
 see [src/btreeInt.h]
