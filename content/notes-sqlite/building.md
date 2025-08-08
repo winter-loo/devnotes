@@ -7,11 +7,11 @@ tags: []
 ## build for development
 
 ```bash
-git submodule update
+git submodule update --init sqlite-src
 cd sqlite
 mkdir build && cd build
-CFLAGS="-g" ../configure --enable-debug
-make -j
+../configure --enable-debug
+CFLAGS="-O0" make -j
 ```
 
 
