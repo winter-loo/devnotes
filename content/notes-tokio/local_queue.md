@@ -35,5 +35,5 @@ struct Inner<T: 'static> {
 
 [ABA problem](https://spcl.inf.ethz.ch/Teaching/2019-pp/lectures/PP-l21-ConcurrencyTheory.pdf)
 
-![[image/aba2.png]]
-![[image/aba1.png]]
+![image/aba2.png](notes-tokio/image/aba2.png)
+![image/aba1.png](notes-tokio/image/aba1.png)

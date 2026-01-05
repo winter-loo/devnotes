@@ -92,7 +92,7 @@ the picture from [Pin, Unpin, and why Rust needs them](https://blog.cloudflare.c
 
 So, let's add Pin type to our [initial code](https://github.com/winter-loo/snippets-rust/blob/main/pin/src/bin/nopin.rs)
 
-![diff_nopin_pin1](./image/diff_nopin_pin1.png)
+![diff_nopin_pin1](notes-tokio/image/diff_nopin_pin1.png)
 
 You see! It's easy to introduce the Pin type to our code: Only change the signature
 of `handle_foo` from `&mut Foo` to `&mut Pin<&mut Foo>`. And convert original pointer
@@ -106,7 +106,7 @@ At this phase, the `check_invariant` still can not pass. To prevent misuse of
 our `struct Foo`, we need make it `!Unpin`, i.e. we need disable auto trait
 `Unpin` for `struct Foo`.
 
-![diff_pin1_main](./image/diff_pin1_main.png)
+![diff_pin1_main](notes-tokio/image/diff_pin1_main.png)
 
 ## Reference
 

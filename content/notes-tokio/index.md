@@ -18,7 +18,7 @@ Time flys to 2025 and AI is everywhere. I don't find code path by myself any lon
 
 ## diagrams
 
-![ctrl_ctrl_c_future.png](./image/tokio_ctrl_c_future.png)
+![tokio_ctrl_c_future.png](./notes-tokio/image/tokio_ctrl_c_future.png)
 
 ## references
 
