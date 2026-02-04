@@ -1,11 +1,12 @@
 ---
 title: "The Evolution of TSDB Compression: From Gorilla to InfluxDB 3"
-date: 2026-02-04
+date: 2026-02-05
 tags:
   - observability
   - tsdb
   - engineering
   - compression
+  - rust
 ---
 
 # The Evolution of TSDB Compression: From Gorilla to InfluxDB 3
@@ -16,70 +17,138 @@ Over the last decade, TSDB (Time Series Database) compression has evolved from c
 
 ## The Gorilla Era: Exploiting Regularity
 
-In 2015, Facebook published the seminal paper **"Gorilla: A Fast, Scalable, In-Memory Time Series Database"**. It introduced two key techniques that became the industry standard for nearly a decade.
+In 2015, Facebook published the seminal paper [**"Gorilla: A Fast, Scalable, In-Memory Time Series Database"**](https://www.vldb.org/pvldb/vol8/p1816-teller.pdf). It introduced two key techniques that became the industry standard for nearly a decade: Delta-of-Delta for timestamps and XOR compression for values.
 
 ### 1. Timestamps: Delta-of-Delta Encoding
 
-Time series data is usually periodic (e.g., every 10 seconds). In a perfect world, the difference between consecutive timestamps (the "delta") would be constant.
+Most time-series data is periodic (e.g., every 60 seconds). In a perfect world, the difference between consecutive timestamps (the "delta") is constant. [Delta-of-Delta encoding](https://en.wikipedia.org/wiki/Delta_encoding) exploits this.
 
-Instead of storing the timestamp ($t_n$), Gorilla stores the **Delta-of-Delta** ($D$):
-$$D = (t_n - t_{n-1}) - (t_{n-1} - t_{n-2})$$
+#### Step-by-Step Walk-through
+Let's compress the sequence: `[1643673600, 1643673660, 1643673722, 1643673780]`
 
-- If $D = 0$, Gorilla stores a single '0' bit.
-- If $D$ is within a small range, it uses a few bits to store the value.
-- Larger $D$ values use more bits with a specific prefix.
+1.  **Calculate Deltas**:
+    *   $t_1 - t_0 = 1643673660 - 1643673600 = 60$
+    *   $t_2 - t_1 = 1643673722 - 1643673660 = 62$
+    *   $t_3 - t_2 = 1643673780 - 1643673722 = 58$
 
-For perfectly regular metrics, this reduces the timestamp storage to a mere **1 bit per point**.
+2.  **Calculate Delta-of-Deltas ($D$):**
+    *   $D_1 = (t_2 - t_1) - (t_1 - t_0) = 62 - 60 = 2$
+    *   $D_2 = (t_3 - t_2) - (t_2 - t_1) = 58 - 62 = -4$
+
+3.  **Bit-Stream Representation (Simplified Gorilla):**
+    *   **$D=0$**: Store bit `0`. (1 bit)
+    *   **$-63 \le D \le 64$**: Store bits `10` followed by 7 bits of $D$. (9 bits)
+    *   **$-255 \le D \le 256$**: Store bits `110` followed by 9 bits of $D$. (12 bits)
+    *   ...and so on for larger ranges.
+
+For our sequence:
+*   $D_1 = 2$: Prefix `10`, value `0000010` (9 bits total)
+*   $D_2 = -4$: Prefix `10`, value `1111100` (two's complement, 9 bits total)
+
+Compared to storing a 64-bit integer, we used only 9 bits.
 
 ### 2. Values: XOR Compression
 
-Floating-point values (IEEE 754) often change slowly. When you XOR two consecutive floating-point values ($v_n \oplus v_{n-1}$), many of the bits are identical, resulting in leading and trailing zeros.
+Floating-point values ([IEEE 754](https://en.wikipedia.org/wiki/IEEE_754)) often change slowly. When you XOR two consecutive values ($v_n \oplus v_{n-1}$), identical bits result in `0`.
 
-- If the XOR sum is 0 (identical values), store a '0' bit.
-- If not, store a '1' bit, followed by bits indicating the number of leading/trailing zeros, and then the "meaningful" bits of the XOR sum.
+```mermaid
+graph LR
+    V1[Value N-1] -- XOR -- Result[XOR Result]
+    V2[Value N] -- XOR -- Result
+    Result --> Zeros[Leading/Trailing Zeros]
+    Zeros --> Meaningful[Meaningful Bits]
+```
 
-This approach allows Gorilla to compress typical time-series floats to an average of **1.37 bytes per point**.
+## Implementation: Core Gorilla in Rust
 
-## The Era of Specialization: Prometheus and TSM
+Below is a simplified implementation of the Gorilla-style bit-packing logic in Rust, focusing on the XOR compression of 64-bit floats.
 
-Following Gorilla's success, systems like **Prometheus** adopted these techniques for their local storage (V2/V3). **InfluxDB**'s TSM (Time-Structured Merge Tree) engine took it further by adding:
+```rust
+/// A simplified XOR compressor for f64 values.
+pub struct GorillaValueCompressor {
+    last_value: u64,
+    last_leading_zeros: u32,
+    last_trailing_zeros: u32,
+    first: bool,
+}
 
-- **Simple8b**: A bit-packing algorithm for integers.
-- **RLE (Run-Length Encoding)**: For repeating values.
-- **Bit-packing**: For booleans.
+impl GorillaValueCompressor {
+    pub fn new() -> Self {
+        Self {
+            last_value: 0,
+            last_leading_zeros: u32::MAX,
+            last_trailing_zeros: 0,
+            first: true,
+        }
+    }
 
-While highly efficient, these formats were "black boxes." If you wanted to analyze the data with Spark or DuckDB, you had to export it via an API, creating a bottleneck.
+    pub fn compress(&mut self, val: f64) -> Vec<u8> {
+        let x = val.to_bits();
+        if self.first {
+            self.last_value = x;
+            self.first = false;
+            // In a real impl, we'd write the full 64 bits here.
+            return x.to_be_bytes().to_vec();
+        }
+
+        let xor = x ^ self.last_value;
+        self.last_value = x;
+
+        if xor == 0 {
+            return vec![0b0]; // Single '0' bit
+        }
+
+        let leading = xor.leading_zeros();
+        let trailing = xor.trailing_zeros();
+        
+        // This is where bit-packing (writing specific bit lengths) occurs.
+        // For brevity, we return a symbolic representation.
+        self.encode_xor(xor, leading, trailing)
+    }
+
+    fn encode_xor(&mut self, xor: u64, leading: u32, trailing: u32) -> Vec<u8> {
+        // Logic for '1' prefix + leading/trailing zero checks...
+        // ... (truncated for conceptual clarity)
+        vec![0b1] 
+    }
+}
+```
 
 ## The Paradigm Shift: InfluxDB 3 and Parquet
 
-InfluxDB 3 (and the underlying IOx engine) represents a fundamental shift. It moved away from custom bit-stream formats toward **Apache Parquet**, a columnar storage standard.
+InfluxDB 3 moved away from custom bit-streams toward [Apache Parquet](https://parquet.apache.org/docs/), a columnar storage standard.
 
-### Why Parquet?
+### Gorilla vs. Parquet (Columnar)
 
-1. **Interoperability**: Parquet files can be read directly by almost any data engineering tool.
-2. **Columnar Projection**: Only the columns needed for a query are read from disk.
-3. **Advanced Compression**: Parquet supports modern algorithms like Zstandard and specialized encoders.
+```mermaid
+sequenceDiagram
+    participant TS as Time Series
+    participant G as Gorilla (Row-Oriented Bitstream)
+    participant P as Parquet (Columnar/SIMD)
 
-### DELTA_BINARY_PACKED
+    TS->>G: [T1,V1], [T2,V2], [T3,V3]
+    Note over G: Bit-by-bit serial processing.<br/>Hard to parallelize.
+    
+    TS->>P: [T1, T2, T3], [V1, V2, V3]
+    Note over P: Block-based processing.<br/>Optimized for SIMD & Vectorization.
+```
 
-For timestamps and integers, InfluxDB 3 leverages Parquet’s `DELTA_BINARY_PACKED` encoding. This is the columnar cousin of Delta-of-delta.
+### Modern Techniques: SIMD and Bit-packing
 
-Instead of bit-by-bit stream processing, it:
-1. Calculates deltas for a block of values.
-2. Finds the minimum delta in the block.
-3. Subtracts that minimum from all deltas.
-4. Uses **bit-packing** to store the results using the minimum number of bits required for the largest value in that block.
+Modern engines use [SIMD](https://en.wikipedia.org/wiki/Single_instruction,_multiple_data) (Single Instruction, Multiple Data) to process blocks of values at once. Instead of Gorilla's bit-at-a-time branching, Parquet's `DELTA_BINARY_PACKED` uses [Bit-packing](https://en.wikipedia.org/wiki/Bit_packing) and [Varint](https://en.wikipedia.org/wiki/Variable-length_quantity) encoding.
 
-This is highly optimized for modern CPUs that prefer processing blocks of data (SIMD) rather than bit-at-a-time branching logic found in the original Gorilla implementation.
+1.  **Block Deltas**: Calculate deltas for a block (e.g., 128 values).
+2.  **Min Delta**: Find the minimum delta.
+3.  **Subtract**: Subtract min delta from all.
+4.  **Bit-width**: Find the max bits needed and pack the entire block.
 
-## Conclusion
+## Summary
 
 The evolution from Gorilla to InfluxDB 3 is a story of maturing infrastructure. We have moved from specialized, "hand-crafted" compression aimed at saving every possible bit in RAM, to standardized, block-oriented columnar formats optimized for disk I/O and ecosystem interoperability.
 
-As we move into the era of "Observability Data Lakes," the ability to compress data without locking it away in a proprietary format has become the new gold standard.
-
 ---
-**References:**
-- [Gorilla: A Fast, Scalable, In-Memory Time Series Database (2015)](https://www.vldb.org/pvldb/vol8/p1816-teller.pdf)
-- [InfluxDB 3.0 Documentation: Storage Engine](https://docs.influxdata.com/influxdb/v3/)
+**Technical References:**
+- [IEEE 754 Standard for Floating-Point Arithmetic](https://ieeexplore.ieee.org/document/8766229)
+- [Gorilla: Facebook's In-Memory TSDB](https://www.vldb.org/pvldb/vol8/p1816-teller.pdf)
 - [Apache Parquet Encoding Specifications](https://parquet.apache.org/docs/file-format/data-pages/encodings/)
+- [Rust `std::simd` Documentation](https://doc.rust-lang.org/std/simd/index.html)
