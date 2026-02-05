@@ -74,44 +74,66 @@ By omitting trailing zeros and reusing metadata, Gorilla achieves high compressi
 
 To see these algorithms in action, I have implemented minimal, runnable examples in the repository:
 
-- **[Gorilla XOR Demo (Go)](../../demo/gorilla-xor-go/main.go)**: A step-by-step trace of how floating-point values are XORed and how leading/trailing zeros are calculated.
-- **[Bit-packing Demo (Rust)](../../demo/simd-bitpacking-rust/src/main.rs)**: A clean implementation of packing multiple small integers into a single 64-bit word, the foundation of modern SIMD TSDBs.
+- **[Gorilla XOR Demo (Go)](https://github.com/winter-loo/devnotes/blob/main/demo/gorilla-xor-go/main.go)**: A step-by-step trace of how floating-point values are XORed and how leading/trailing zeros are calculated.
+- **[Bit-packing Demo (Rust)](https://github.com/winter-loo/devnotes/blob/main/demo/simd-bitpacking-rust/src/main.rs)**: A clean implementation of packing multiple small integers into a single 64-bit word, the foundation of modern SIMD TSDBs.
 
-## The Paradigm Shift: Serial vs. SIMD
+## Implementation: The Core XOR Logic in Rust
 
-The "magic" of Gorilla happens in the bit-level masking during XOR encoding. To understand the state management, we must look at the encoder structure which tracks the previous leading and trailing zero counts to minimize metadata overhead.
+To understand how Gorilla is implemented, we look at the encoder state. It must track the previous value and the previous leading/trailing zero counts to decide which control bits to write.
 
 ```rust
 struct GorillaEncoder {
     writer: BitWriter,
+    last_value: u64,
     last_leading: u32,
     last_trailing: u32,
+    first: bool,
 }
 
 impl GorillaEncoder {
-    fn encode_xor(&mut self, xor: u64, leading: u32, trailing: u32) {
+    /// High-level function to compress a single f64 value
+    pub fn compress(&mut self, val: f64) {
+        let x = val.to_bits(); // Get raw IEEE 754 bits
+        if self.first {
+            self.last_value = x;
+            self.first = false;
+            self.writer.write_bits(x, 64); // First value is stored in full
+            return;
+        }
+
+        let xor = x ^ self.last_value;
+        self.last_value = x;
+
         if xor == 0 {
-            self.writer.write_bit(false); // Store '0'
+            self.writer.write_bit(false); // Store '0' (Identical value)
         } else {
-            self.writer.write_bit(true); // Store '1'
+            let leading = xor.leading_zeros();
+            let trailing = xor.trailing_zeros();
+            // Call the core bit-manipulation logic
+            self.encode_xor(xor, leading, trailing);
+        }
+    }
+
+    /// Core logic for encoding the XORed bit-difference
+    fn encode_xor(&mut self, xor: u64, leading: u32, trailing: u32) {
+        self.writer.write_bit(true); // Store '1' (Value changed)
+        
+        if leading >= self.last_leading && trailing >= self.last_trailing {
+            // Control '10': Reuse previous leading/trailing metadata
+            self.writer.write_bit(false);
+            let meaningful_bits = 64 - self.last_leading - self.last_trailing;
+            self.writer.write_bits(xor >> self.last_trailing, meaningful_bits);
+        } else {
+            // Control '11': Write new leading/trailing counts
+            self.writer.write_bit(true);
+            self.writer.write_bits(leading as u64, 5); // 5 bits for leading
             
-            if leading >= self.last_leading && trailing >= self.last_trailing {
-                // Control '0': Use previous leading/trailing counts
-                self.writer.write_bit(false);
-                let meaningful_bits = 64 - self.last_leading - self.last_trailing;
-                self.writer.write_bits(xor >> self.last_trailing, meaningful_bits);
-            } else {
-                // Control '1': New leading/trailing counts
-                self.writer.write_bit(true);
-                self.writer.write_bits(leading as u64, 5); // 5 bits for leading (0-31+)
-                
-                let meaningful_bits = 64 - leading - trailing;
-                self.writer.write_bits(meaningful_bits as u64, 6); // 6 bits for length
-                self.writer.write_bits(xor >> trailing, meaningful_bits);
-                
-                self.last_leading = leading;
-                self.last_trailing = trailing;
-            }
+            let meaningful_bits = 64 - leading - trailing;
+            self.writer.write_bits(meaningful_bits as u64, 6); // 6 bits for length
+            self.writer.write_bits(xor >> trailing, meaningful_bits);
+            
+            self.last_leading = leading;
+            self.last_trailing = trailing;
         }
     }
 }
@@ -160,8 +182,8 @@ pub fn pack_block(values: &[u32; 8], bit_width: u32) -> u64 {
 
 Despite the theoretical superiority of SIMD and Rust's low-level control, [VictoriaMetrics](https://victoriametrics.com/) (written in Go) consistently outperforms many "modern" Rust TSDBs. This raises a provocative question: **Is the architectural overhead of Parquet worth it?**
 
-1.  **The "Go SIMD" Reality**: Go lacks direct SIMD intrinsics in the language, yet VM achieves incredible throughput by using highly optimized assembly for critical loops and sticking to a "shared-nothing" architecture that minimizes GC pressure.
-2.  **Parquet's Tax**: While Parquet is great for interoperability, the overhead of its complex metadata and the "shredding" required to turn rows into columns can outweigh the raw speed of SIMD if the query pattern is simple.
+1.  **The \"Go SIMD\" Reality**: Go lacks direct SIMD intrinsics in the language, yet VM achieves incredible throughput by using highly optimized assembly for critical loops and sticking to a \"shared-nothing\" architecture that minimizes GC pressure.
+2.  **Parquet's Tax**: While Parquet is great for interoperability, the overhead of its complex metadata and the \"shredding\" required to turn rows into columns can outweigh the raw speed of SIMD if the query pattern is simple.
 3.  **The Bitstream Defense**: VictoriaMetrics proves that if you optimize the *memory access patterns* and minimize allocations, a well-tuned bitstream implementation can often beat a generic columnar implementation due to better cache locality for specific time-series workloads.
 
 The trade-off remains: Do you want the **ecosystem compatibility** of Parquet/Arrow, or the **raw, specialized efficiency** of a custom bitstream?
@@ -170,6 +192,6 @@ The trade-off remains: Do you want the **ecosystem compatibility** of Parquet/Ar
 **Technical References:**
 - [IEEE 754 Standard for Floating-Point Arithmetic](https://ieeexplore.ieee.org/document/8766229)
 - [Gorilla: Facebook's In-Memory TSDB](https://www.vldb.org/pvldb/vol8/p1816-teller.pdf)
-- [Bit-packing Explained (Lemire)](https://github.com/lemire/FastPFor) - *High-performance integer compression techniques.*
+- [Bit-packing / RLE Hybrid Explained (Apache Parquet)](https://parquet.apache.org/docs/file-format/data-pages/encodings/#RLE) - *Comprehensive guide to modern bit-packing.*
 - [Apache Parquet Encoding Specifications](https://parquet.apache.org/docs/file-format/data-pages/encodings/)
 - [Rust `std::simd` Documentation](https://doc.rust-lang.org/std/simd/index.html)
