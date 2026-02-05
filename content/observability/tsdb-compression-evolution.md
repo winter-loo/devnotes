@@ -41,43 +41,61 @@ To decode $t_2$, the reader must have already decoded $t_0$, $t_1$, and the firs
 Floating-point values ([IEEE 754](https://en.wikipedia.org/wiki/IEEE_754)) often change slowly. When you XOR two consecutive values ($v_n \oplus v_{n-1}$), identical bits result in `0`.
 
 ```mermaid
-bitfield
-  0-1: "Control (00/10/11)"
-  2-6: "Leading Zeros (5 bits)"
-  7-12: "Meaningful Length (6 bits)"
-  13-40: "XORed Data (Variable)"
-  41-63: "Trailing Zeros (Implicit)"
-```
+graph LR
+    subgraph XOR_Chunk_Structure [Gorilla XOR Bit Layout]
+    direction LR
+    Control[Control Bits<br/>'1' or '10' or '11'] --- Lead[Leading Zeros<br/>5 bits]
+    Lead --- Len[Meaningful Length<br/>6 bits]
+    Len --- Data[Meaningful Data<br/>Variable Bits]
+    end
 
-*Note: The diagram above represents the logical structure of a compressed XOR chunk. If the XOR result is the same as the previous, we store only a single `0` bit.*
+    Start((XOR Result)) --> IsZero{Result == 0?}
+    IsZero -- Yes --> Bit0[Store '0']
+    IsZero -- No --> Bit1[Store '1']
+    Bit1 --> Range{Use Same Range?}
+    Range -- Yes --> Bit10[Store '0']
+    Bit10 --> Data
+    Range -- No --> Bit11[Store '1']
+    Bit11 --> Lead
+    Lead --> Len
+    Len --> Data
+```
 
 ## Implementation: The Core XOR Logic
 
-While trivial functions like `new()` are common, the "magic" of Gorilla happens in the bit-level masking during XOR encoding.
+The "magic" of Gorilla happens in the bit-level masking during XOR encoding. To understand the state management, we must look at the encoder structure which tracks the previous leading and trailing zero counts to minimize metadata overhead.
 
 ```rust
-fn encode_xor(&mut self, xor: u64, leading: u32, trailing: u32) {
-    if xor == 0 {
-        self.writer.write_bit(false); // Store '0'
-    } else {
-        self.writer.write_bit(true); // Store '1'
-        
-        if leading >= self.last_leading && trailing >= self.last_trailing {
-            // Control '0': Use previous leading/trailing counts
-            self.writer.write_bit(false);
-            let meaningful_bits = 64 - self.last_leading - self.last_trailing;
-            self.writer.write_bits(xor >> self.last_trailing, meaningful_bits);
+struct GorillaEncoder {
+    writer: BitWriter,
+    last_leading: u32,
+    last_trailing: u32,
+}
+
+impl GorillaEncoder {
+    fn encode_xor(&mut self, xor: u64, leading: u32, trailing: u32) {
+        if xor == 0 {
+            self.writer.write_bit(false); // Store '0'
         } else {
-            // Control '1': New leading/trailing counts
-            self.writer.write_bit(true);
-            self.writer.write_bits(leading as u64, 5); // 5 bits for leading (0-31+)
+            self.writer.write_bit(true); // Store '1'
             
-            let meaningful_bits = 64 - leading - trailing;
-            self.writer.write_bits(meaningful_bits as u64, 6); // 6 bits for length
-            self.writer.write_bits(xor >> trailing, meaningful_bits);
-            
-            self.last_leading = leading;
-            self.last_trailing = trailing;
+            if leading >= self.last_leading && trailing >= self.last_trailing {
+                // Control '0': Use previous leading/trailing counts
+                self.writer.write_bit(false);
+                let meaningful_bits = 64 - self.last_leading - self.last_trailing;
+                self.writer.write_bits(xor >> self.last_trailing, meaningful_bits);
+            } else {
+                // Control '1': New leading/trailing counts
+                self.writer.write_bit(true);
+                self.writer.write_bits(leading as u64, 5); // 5 bits for leading (0-31+)
+                
+                let meaningful_bits = 64 - leading - trailing;
+                self.writer.write_bits(meaningful_bits as u64, 6); // 6 bits for length
+                self.writer.write_bits(xor >> trailing, meaningful_bits);
+                
+                self.last_leading = leading;
+                self.last_trailing = trailing;
+            }
         }
     }
 }
@@ -85,15 +103,41 @@ fn encode_xor(&mut self, xor: u64, leading: u32, trailing: u32) {
 
 ## The Paradigm Shift: Serial vs. SIMD
 
-The primary limitation of Gorilla is its **"bit-at-a-time branching"**. Because every value's interpretation depends on the control bits of the previous value, the CPU's branch predictor is heavily taxed, and instruction-level parallelism (ILP) is limited.
+The primary limitation of Gorilla is its **"bit-at-a-time branching"**. Because every value's interpretation depends on the control bits of the previous value, the CPU's branch predictor is heavily taxed. Every `if xor == 0` or `if leading >= last_leading` creates a branch. In a serial bitstream, the CPU cannot easily look ahead to execute instructions for $v_{n+1}$ while still decoding $v_n$, severely limiting **Instruction-Level Parallelism (ILP)**.
 
-In contrast, modern engines like InfluxDB 3 (via Apache Parquet) utilize **SIMD block processing**.
+In contrast, modern engines like InfluxDB 3 (via Apache Parquet) utilize **SIMD block processing**. By sacrificing the extreme "per-value" compression ratio of Gorilla for fixed-size blocks, they unlock massive hardware acceleration.
+
+### Deep Dive: SIMD Block Processing in Rust
+
+In a vectorized TSDB, instead of writing a continuous bitstream, we process blocks of data (e.g., 64 or 128 values) at once. Using Rust's `std::simd` (or crates like `packed_simd`), we can load multiple deltas into a single register.
+
+Consider **SIMD Bit-packing**:
+1. **Batch Loading**: We load 8 values into a `u32x8` SIMD register.
+2. **Finding the Max Bits**: Rather than checking bits for each value, we calculate the `max_bits` required for the *entire block* using a vectorized `OR` and `leading_zeros`.
+3. **Vectorized Shifting**: To pack the values, we use SIMD shift and mask operations. Instead of writing bit-by-bit, we write an entire 256-bit or 512-bit register to memory in a single instruction.
+
+```rust
+// Simplified logic for SIMD bit-packing
+use std::simd::u32x8;
+
+pub fn pack_block(values: &[u32; 8], bit_width: u32) -> u64 {
+    let v = u32x8::from_array(*values);
+    // In a real implementation, we would perform bit-shuffling
+    // across the SIMD lanes to pack these values into a compact
+    // sequence, avoiding all individual branching.
+    
+    // The lack of per-value 'if' statements means zero branch
+    // mispredictions during the tight packing loop.
+    todo!("Hardware-specific shuffle/pack instructions")
+}
+```
 
 | Aspect | Gorilla (Bitstream) | Parquet (SIMD/Bit-packing) |
 | :--- | :--- | :--- |
 | **Data Layout** | Hybrid (Values interleaved) | Pure Columnar |
 | **Processing** | Serial (Bit-by-bit) | Vectorized (128+ values at once) |
-| **Hardware** | Scalar CPU | AVX-512 / NEON |
+| **Hardware** | Scalar CPU (Branch-heavy) | AVX-512 / NEON (Branchless) |
+| **Throughput** | Limited by Branch Predictor | Limited by Memory Bandwidth |
 | **Random Access** | Impossible (must scan) | Possible at block boundaries |
 
 ## The VictoriaMetrics Paradox: Why Go still beats Rust/SIMD?
