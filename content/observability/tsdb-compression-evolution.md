@@ -61,7 +61,23 @@ graph LR
     Len --> Data
 ```
 
-## Implementation: The Core XOR Logic
+**Diagram Explanation:**
+The flowchart above illustrates the decision tree for every value in the XOR stream.
+- **Control Bits**: The first 1 or 2 bits determine the "state". A `0` means the value is identical to the previous. A `10` means we reuse the previous "leading zeros" and "meaningful length" counts to save metadata space. A `11` signals a completely new range of meaningful bits.
+- **Leading Zeros (5 bits)**: Stores the number of zeros at the start of the XOR result (up to 31).
+- **Meaningful Length (6 bits)**: Stores how many bits of actual data follow.
+- **Meaningful Data**: The actual XORed bits that changed.
+
+By omitting trailing zeros and reusing metadata, Gorilla achieves high compression for floats that change incrementally.
+
+## Runnable Demos
+
+To see these algorithms in action, I have implemented minimal, runnable examples in the repository:
+
+- **[Gorilla XOR Demo (Go)](../../demo/gorilla-xor-go/main.go)**: A step-by-step trace of how floating-point values are XORed and how leading/trailing zeros are calculated.
+- **[Bit-packing Demo (Rust)](../../demo/simd-bitpacking-rust/src/main.rs)**: A clean implementation of packing multiple small integers into a single 64-bit word, the foundation of modern SIMD TSDBs.
+
+## The Paradigm Shift: Serial vs. SIMD
 
 The "magic" of Gorilla happens in the bit-level masking during XOR encoding. To understand the state management, we must look at the encoder structure which tracks the previous leading and trailing zero counts to minimize metadata overhead.
 
