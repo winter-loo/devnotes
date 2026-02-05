@@ -147,28 +147,31 @@ In contrast, modern engines like InfluxDB 3 (via Apache Parquet) utilize **SIMD 
 
 ### Deep Dive: SIMD Block Processing in Rust
 
-In a vectorized TSDB, instead of writing a continuous bitstream, we process blocks of data (e.g., 64 or 128 values) at once. Using Rust's `std::simd` (or crates like `packed_simd`), we can load multiple deltas into a single register.
+In a vectorized TSDB, instead of writing a continuous bitstream where each value depends on the previous, we process blocks of data (e.g., 64 or 128 values) at once. The core advantage is not just "packing faster," but **branchless metadata calculation**.
 
-Consider **SIMD Bit-packing**:
-1. **Batch Loading**: We load 8 values into a `u32x8` SIMD register.
-2. **Finding the Max Bits**: Rather than checking bits for each value, we calculate the `max_bits` required for the *entire block* using a vectorized `OR` and `leading_zeros`.
-3. **Vectorized Shifting**: To pack the values, we use SIMD shift and mask operations. Instead of writing bit-by-bit, we write an entire 256-bit or 512-bit register to memory in a single instruction.
+#### The "Max-bits" Win
+In Gorilla, for every value, we must check: "Is the delta the same as before? Does it fit in the current range?" This is a branch. In a block-based system, we calculate the maximum number of bits needed for the entire block ($W$) and then pack all values using exactly $W$ bits.
+
+Using Rust's `std::simd` (Portable SIMD), calculating this $W$ for 8 values becomes a branchless operation:
 
 ```rust
-// Simplified logic for SIMD bit-packing
 use std::simd::u32x8;
 
-pub fn pack_block(values: &[u32; 8], bit_width: u32) -> u64 {
-    let v = u32x8::from_array(*values);
-    // In a real implementation, we would perform bit-shuffling
-    // across the SIMD lanes to pack these values into a compact
-    // sequence, avoiding all individual branching.
+pub fn calculate_max_bits(deltas: &[u32; 8]) -> u32 {
+    let v = u32x8::from_array(*deltas);
+    // Vectorized OR: combines all deltas into one mask
+    // If any delta has bit 7 set, the final 'reduced' value will have bit 7 set.
+    let reduced = v.reduce_or(); 
     
-    // The lack of per-value 'if' statements means zero branch
-    // mispredictions during the tight packing loop.
-    todo!("Hardware-specific shuffle/pack instructions")
+    // Total bits needed is 32 minus the leading zeros of the OR-sum
+    32 - reduced.leading_zeros()
 }
 ```
+
+**Why this is faster:**
+1. **Branchless**: There are no `if` statements in the loop. The CPU pipelines the instructions perfectly.
+2. **Deterministic**: Every block of 8 values takes the exact same number of cycles to process, regardless of the data values.
+3. **Hardware Alignment**: Modern CPUs (AVX-512) can do this for 16 or 32 values in a single instruction.
 
 | Aspect | Gorilla (Bitstream) | Parquet (SIMD/Bit-packing) |
 | :--- | :--- | :--- |
