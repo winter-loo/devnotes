@@ -98,14 +98,14 @@ This library provides the `HttpsProxyAgent` class, which is compatible with the 
 
 ```mermaid
 flowchart TB
-    cfg["Config file\nchannels.discord.proxy"] --> validate["Config load\nZod validation"]
-    validate --> monitor["Discord monitor\nprovider.ts"]
-    monitor --> decision{Proxy set?}
-    decision -- No --> gwDefault["GatewayPlugin\nnew WebSocket(url)"]
-    decision -- Yes --> gwCustom["Proxy GatewayPlugin\ncreateWebSocket override"]
-    gwCustom --> agent["HttpsProxyAgent\nproxyUrl"]
-    agent --> wsProxy["WebSocket\nagent=proxy"]
-    gwDefault --> gateway["Discord Gateway\nwss://gateway.discord.gg"]
+    cfg["Config<br/>file<br/>channels.discord.proxy"] --> validate["Config<br/>load<br/>Zod<br/>validation"]
+    validate --> monitor["Discord<br/>monitor<br/>provider.ts"]
+    monitor --> decision{Proxy<br/>set?}
+    decision -- No --> gwDefault["GatewayPlugin<br/>new<br/>WebSocket(url)"]
+    decision -- Yes --> gwCustom["Proxy<br/>GatewayPlugin<br/>createWebSocket<br/>override"]
+    gwCustom --> agent["HttpsProxyAgent<br/>proxyUrl"]
+    agent --> wsProxy["WebSocket<br/>agent=proxy"]
+    gwDefault --> gateway["Discord<br/>Gateway<br/>wss://gateway.discord.gg"]
     wsProxy --> gateway
 ```
 
